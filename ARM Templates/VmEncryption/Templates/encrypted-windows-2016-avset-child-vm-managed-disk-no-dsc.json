@@ -1,0 +1,489 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "vmName": {
+            "type": "string"
+        },
+        "privateIpAddress": {
+            "type": "string",
+            "defaultValue": ""
+        },
+        "availabilitySetName": {
+            "type": "string",
+            "defaultValue": ""
+        },
+        "templateBaseUrl": {
+            "type": "securestring"
+        },
+        "sasToken": {
+            "type": "securestring"
+        },
+        "networkResourceGroupName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the resource group that the network lives in."
+            }
+        },
+        "networkName": {
+            "type": "string",
+            "metadata": {
+                "description": "Network name."
+            }
+        },
+        "subnetName": {
+            "type": "string",
+            "metadata": {
+                "description": "Subnet name."
+            }
+        },
+        "virtualMachineSize": {
+            "type": "string",
+            "defaultValue": "Standard_A0",
+            "metadata": {
+                "description": "The size of your VM."
+            },
+            "allowedValues": [
+                "Standard_A0",
+                "Standard_A1",
+                "Standard_F1S",
+                "Standard_F2S",
+                "Standard_F1",
+                "Standard_F2",
+                "Standard_D1_v2",
+                "Standard_D1_v2",
+                "Standard_D2_v2_Promo",
+                "Standard_B2S",
+                "Standard_B2MS",
+                "Standard_E4S_v3"
+            ]
+        },
+        "adminUserName": {
+            "type": "string",
+            "defaultValue": "testadm",
+            "metadata": {
+                "description": "Remote desktop user Id"
+            }
+        },
+        "adminPassword": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Remote desktop user password. Must be a strong password"
+            }
+        },
+        "storageAccountType": {
+            "type": "string",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Premium_LRS"
+            ],
+            "defaultValue": "Standard_LRS",
+            "metadata": {
+                "description": "Replication option for the VM image storage account"
+            }
+        },
+        "storageAccountSizeInGb": {
+            "type": "string",
+            "allowedValues": [
+                "128",
+                "256"
+            ],
+            "defaultValue": "128"
+        },
+        "storageAccountCachingOption": {
+            "type": "string",
+            "allowedValues": [
+                "ReadOnly",
+                "ReadWrite",
+                "None"
+            ],
+            "defaultValue": "ReadOnly"
+        },
+        "diagnosticsStorageAccountType": {
+            "type": "string",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Premium_LRS"
+            ],
+            "defaultValue": "Standard_LRS",
+            "metadata": {
+                "description": "Replication option for the VM image storage account"
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Azure region where resources should be deployed."
+            }
+        },
+        "aadClientID": {
+            "type": "string",
+            "metadata": {
+                "description": "Client ID of AAD app which has permissions to KeyVault"
+            }
+        },
+        "aadClientSecret": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Client Secret of AAD app which has permissions to KeyVault"
+            }
+        },
+        "keyVaultName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the KeyVault to place the volume encryption key"
+            }
+        },
+        "keyVaultResourceGroup": {
+            "type": "string",
+            "metadata": {
+                "description": "Resource group of the KeyVault"
+            }
+        },
+        "keyEncryptionKeyURL": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "URL of the KeyEncryptionKey used to encrypt the volume encryption key"
+            }
+        },
+        "sequenceVersion": {
+            "type": "string",
+            "defaultValue": "1.0",
+            "metadata": {
+                "description": "Pass in an unique value like a GUID everytime the operation needs to be force run"
+            }
+        },
+        "dscModulesUrl": {
+            "type": "string",
+            "metadata": {
+                "description": "URL for the DSC configuration package. NOTE: Can be a Github url(raw) to the zip file (this is the default value)"
+            }
+        },
+        "dscConfigurationFunction": {
+            "type": "string",
+            "defaultValue": "UpdateLCMforAAPull.ps1\\ConfigureLCMforAAPull",
+            "metadata": {
+                "description": "DSC configuration function to call. Should contain filename and function in format fileName.ps1\\configurationfunction"
+            }
+        },
+        "dscRegistrationKey": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Registration key to use to onboard to the Azure Automation DSC pull/reporting server"
+            }
+        },
+        "dscRegistrationUrl": {
+            "type": "string",
+            "metadata": {
+                "description": "Registration url of the Azure Automation DSC pull/reporting server"
+            }
+        },
+        "dscNodeConfigurationName": {
+            "type": "string",
+            "metadata": {
+                "description": "The name of the node configuration, on the Azure Automation DSC pull server, that this node will be configured as"
+            }
+        },
+        "dscConfigurationMode": {
+            "type": "string",
+            "defaultValue": "ApplyAndMonitor",
+            "allowedValues": [
+                "ApplyOnly",
+                "ApplyAndMonitor",
+                "ApplyAndAutoCorrect"
+            ],
+            "metadata": {
+                "description": "DSC agent (LCM) configuration mode setting. ApplyOnly, ApplyAndMonitor, or ApplyAndAutoCorrect"
+            }
+        },
+        "dscConfigurationModeFrequencyMins": {
+            "type": "int",
+            "defaultValue": 15,
+            "metadata": {
+                "description": "DSC agent (LCM) configuration mode frequency setting, in minutes"
+            }
+        },
+        "dscRefreshFrequencyMins": {
+            "type": "int",
+            "defaultValue": 30,
+            "metadata": {
+                "description": "DSC agent (LCM) refresh frequency setting, in minutes"
+            }
+        },
+        "dscRebootNodeIfNeeded": {
+            "type": "bool",
+            "defaultValue": true,
+            "metadata": {
+                "description": "DSC agent (LCM) rebootNodeIfNeeded setting"
+            }
+        },
+        "dscActionAfterReboot": {
+            "type": "string",
+            "defaultValue": "ContinueConfiguration",
+            "allowedValues": [
+                "ContinueConfiguration",
+                "StopConfiguration"
+            ],
+            "metadata": {
+                "description": "DSC agent (LCM) actionAfterReboot setting. ContinueConfiguration or StopConfiguration"
+            }
+        },
+        "dscAllowModuleOverwrite": {
+            "type": "bool",
+            "defaultValue": false,
+            "metadata": {
+                "description": "DSC agent (LCM) allowModuleOverwrite setting"
+            }
+        },
+        "dscTimestamp": {
+            "type": "string",
+            "metadata": {
+                "description": "The current datetime, as a string, to force the request to go through ARM even if all fields are the same as last ARM deployment of this template; example in parameters file is in MM/dd/yyyy H:mm:ss tt format"
+            },
+            "defaultValue": "[uniqueString(resourceGroup().id)]"
+        },
+        "storageAccountName": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "This is not used, but leaving this is to make paramters consistent with the non-managed disk template.  This can be removed once everything is migrated to managed disks."
+            }
+        },
+        "diagnosticsStorageAccountName": {
+            "type": "string",
+            "defaultValue": "[toLower(concat(parameters('vmName'), 'VmDiag'))]"
+        },
+        "loadBalancerBackendAddressPools": {
+            "type": "array",
+            "defaultValue": []
+        }
+    },
+    "variables": {
+        "vnetID": "[resourceId(parameters('networkResourceGroupName'), 'Microsoft.Network/virtualNetworks',parameters('networkName'))]",
+        "subnetRef": "[concat(variables('vnetId'), '/subnets/', parameters('subnetName'))]",
+        "networkInterfaceName": "[concat(parameters('vmName'), '-nic01')]",
+        "keyVaultURL": "[concat('https://', parameters('keyVaultName'), '.vault.azure.net/')]",
+        "keyVaultResourceID": "[concat(subscription().id,'/resourceGroups/',parameters('keyVaultResourceGroup'),'/providers/Microsoft.KeyVault/vaults/', parameters('keyVaultName'))]",
+        "encryptionExtensionName": "AzureDiskEncryption",
+        "vmEncryptionTemplatePath": "/VmEncryption/Templates/updatevm-kek.json"
+    },
+    "resources": [
+        {
+            "name": "[parameters('vmName')]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2017-03-30",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Network/networkInterfaces/', variables('networkInterfaceName'))]",
+                "[concat('Microsoft.Storage/storageAccounts/', parameters('diagnosticsStorageAccountName'))]"
+            ],
+            "properties": {
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets',parameters('availabilitySetName'))]"
+                },
+                "osProfile": {
+                    "computerName": "[parameters('vmName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "windowsConfiguration": {
+                        "provisionVmAgent": "true"
+                    }
+                },
+                "hardwareProfile": {
+                    "vmSize": "[parameters('virtualMachineSize')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "MicrosoftWindowsServer",
+                        "offer": "WindowsServer",
+                        "sku": "2016-Datacenter",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "caching": "[parameters('storageAccountCachingOption')]",
+                        "createOption": "FromImage",
+                        "name": "[concat(parameters('vmName'), '-OsDisk')]",
+                        "managedDisk": {
+                            "storageAccountType": "[parameters('storageAccountType')]"
+                        },
+                        "diskSizeGB": "[parameters('storageAccountSizeInGb')]"
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkInterfaceName'))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[reference(resourceId('Microsoft.Storage/storageAccounts', parameters('diagnosticsStorageAccountName')), '2015-06-15').primaryEndpoints['blob']]"
+                    }
+                }
+            },
+            "resources": [
+                {
+                    "type": "extensions",
+                    "location": "[parameters('location')]",
+                    "dependsOn": [
+                        "[parameters('vmName')]"
+                    ],
+                    "name": "[variables('encryptionExtensionName')]",
+                    "apiVersion": "2016-04-30-preview",
+                    "properties": {
+                        "publisher": "Microsoft.Azure.Security",
+                        "type": "AzureDiskEncryption",
+                        "typeHandlerVersion": "1.1",
+                        "autoUpgradeMinorVersion": true,
+                        "forceUpdateTag": "[parameters('sequenceVersion')]",
+                        "settings": {
+                            "AADClientID": "[parameters('aadClientID')]",
+                            "KeyVaultURL": "[variables('keyVaultURL')]",
+                            "KeyEncryptionKeyURL": "[parameters('keyEncryptionKeyURL')]",
+                            "KeyEncryptionAlgorithm": "RSA-OAEP",
+                            "VolumeType": "All",
+                            "EncryptionOperation": "EnableEncryption"
+                        },
+                        "protectedSettings": {
+                            "AADClientSecret": "[parameters('aadClientSecret')]"
+                        }
+                    }
+                },
+                {
+                    "name": "IaaSAntimalware",
+                    "dependsOn": [
+                        "[parameters('vmName')]"
+                    ],
+                    "type": "extensions",
+                    "location": "[parameters('location')]",
+                    "apiVersion": "2015-06-15",
+                    "properties": {
+                        "publisher": "Microsoft.Azure.Security",
+                        "type": "IaaSAntimalware",
+                        "typeHandlerVersion": "1.1",
+                        "autoUpgradeMinorVersion": true,
+                        "settings": {
+                            "AntimalwareEnabled": "true",
+                            "Exclusions": {
+                                "Paths": "",
+                                "Extensions": "",
+                                "Processes": ""
+                            },
+                            "RealtimeProtectionEnabled": "true",
+                            "ScheduledScanSettings": {
+                                "isEnabled": "true",
+                                "scanType": "Quick",
+                                "day": "7",
+                                "time": "120"
+                            }
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "[concat('UpdateVmEncryptionSettings-', parameters('vmName'))]",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2015-01-01",
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines/extensions',  parameters('vmName'), variables('encryptionExtensionName'))]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[concat(parameters('templateBaseUrl'), variables('vmEncryptionTemplatePath'), parameters('sasToken'))]",
+                    "contentVersion": "1.0.0.0"
+                },
+                "parameters": {
+                    "location": {
+                        "value": "[parameters('location')]"
+                    },
+                    "vmName": {
+                        "value": "[parameters('vmName')]"
+                    },
+                    "keyVaultResourceID": {
+                        "value": "[variables('keyVaultResourceID')]"
+                    },
+                    "keyVaultSecretUrl": {
+                        "value": "[reference(resourceId('Microsoft.Compute/virtualMachines/extensions',  parameters('vmName'), variables('encryptionExtensionName'))).instanceView.statuses[0].message]"
+                    },
+                    "keyEncryptionKeyURL": {
+                        "value": "[parameters('keyEncryptionKeyURL')]"
+                    }
+                }
+            }
+        },
+        {
+            "name": "[parameters('diagnosticsStorageAccountName')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2016-01-01",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('diagnosticsStorageAccountType')]"
+            },
+            "kind": "Storage",
+            "properties": {
+                "encryption": {
+                    "keySource": "Microsoft.Storage",
+                    "services": {
+                        "blob": {
+                            "enabled": true
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "[if(greater(length(parameters('privateIpAddress')),0), variables('networkInterfaceName'), 'dummyNic1')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "condition": "[greater(length(parameters('privateIpAddress')),0)]",
+            "apiVersion": "2016-09-01",
+            "location": "[parameters('location')]",
+            "dependsOn": [],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            },
+                            "privateIPAllocationMethod": "Static",
+                            "privateIPAddress": "[parameters('privateIpAddress')]",
+                            "loadBalancerBackendAddressPools": "[parameters('loadBalancerBackendAddressPools')]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "[if(equals(length(parameters('privateIpAddress')),0), variables('networkInterfaceName'), 'dummyNic2')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "condition": "[equals(length(parameters('privateIpAddress')),0)]",
+            "apiVersion": "2016-09-01",
+            "location": "[parameters('location')]",
+            "dependsOn": [],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            },
+                            "privateIPAllocationMethod": "Dynamic",
+                            "loadBalancerBackendAddressPools": "[parameters('loadBalancerBackendAddressPools')]"
+                        }
+                    }
+                ]
+            }
+        }
+    ],
+    "outputs": {}
+}
