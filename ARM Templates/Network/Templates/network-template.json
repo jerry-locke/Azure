@@ -1,0 +1,223 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "templateBaseUrl": {
+            "type": "securestring"
+        },
+        "sasToken": {
+            "type": "securestring"
+        },
+        "secondOctet": {
+            "type": "int"
+        },
+        "networkInfo": {
+            "type": "array",
+            "defaultValue": [
+                {
+                    "networkName": "WestCentralUSVNet",
+                    "networkLocation": "westcentralus",
+                    "offset": 0,
+                    "enableServiceEndpoints": false
+                },
+                {
+                    "networkName": "SouthCentralUSVNet",
+                    "networkLocation": "southcentralus",
+                    "offset": 64,
+                    "enableServiceEndpoints": false
+                },
+                {
+                    "networkName": "EastUSVNet",
+                    "networkLocation": "eastus",
+                    "offset": 128,
+                    "enableServiceEndpoints": false
+                },
+                {
+                    "networkName": "WestUS2VNet",
+                    "networkLocation": "westus2",
+                    "offset": 192,
+                    "enableServiceEndpoints": false
+                }
+            ]
+        },
+        "storageServiceEndpointLocations": {
+            "type": "array"
+        },
+        "dnsServerAddresses": {
+            "type": "array",
+            "metadata": {
+                "description": "The DNS address(es) of the DNS Server(s) used by the VNET"
+            },
+            "defaultValue": []
+        }
+    },
+    "variables": {
+        "gatewaySubnetName": "GatewaySubnet",
+        "arrayIndexes": [
+            "[mod(0, length(parameters('networkInfo')))]",
+            "[mod(1, length(parameters('networkInfo')))]",
+            "[mod(2, length(parameters('networkInfo')))]",
+            "[mod(3, length(parameters('networkInfo')))]"
+        ],
+        "serviceEndpoints": [
+            {
+                "service": "Microsoft.Storage",
+                "locations": "[parameters('storageServiceEndpointLocations')]"
+            }
+        ],
+        "emptyArray": [],
+        "sharedNsgRules": [
+            {
+                "name": "AllowSpecificSiteInBound",
+                "properties": {
+                    "protocol": "*",
+                    "sourcePortRange": "*",
+                    "destinationPortRange": "*",
+                    "sourceAddressPrefix": "10.1.1.0/24",
+                    "destinationAddressPrefix": "*",
+                    "access": "Allow",
+                    "priority": 3900,
+                    "direction": "Inbound"
+                }
+            },
+            {
+                "name": "AllowAzureLoadBalancerInBound",
+                "properties": {
+                    "protocol": "*",
+                    "sourcePortRange": "*",
+                    "destinationPortRange": "*",
+                    "sourceAddressPrefix": "AzureLoadBalancer",
+                    "destinationAddressPrefix": "*",
+                    "access": "Allow",
+                    "priority": 3999,
+                    "direction": "Inbound"
+                }
+            },
+            {
+                "name": "DenyVnetInBound",
+                "properties": {
+                    "protocol": "*",
+                    "sourcePortRange": "*",
+                    "destinationPortRange": "*",
+                    "sourceAddressPrefix": "VirtualNetwork",
+                    "destinationAddressPrefix": "VirtualNetwork",
+                    "access": "Deny",
+                    "priority": 4000,
+                    "direction": "Inbound"
+                }
+            },
+            {
+                "name": "OutBoundToNetworkApplianceFW",
+                "properties": {
+                    "protocol": "*",
+                    "sourcePortRange": "*",
+                    "destinationPortRange": "*",
+                    "sourceAddressPrefix": "VirtualNetwork",
+                    "destinationAddressPrefix": "10.1.0.4",
+                    "access": "Allow",
+                    "priority": 4003,
+                    "direction": "Outbound"
+                }
+            }
+        ],
+        "backendWebAppNsgRules": [
+            {
+                "name": "AllowSpecificPublicRdpInBound",
+                "properties": {
+                    "protocol": "TCP",
+                    "sourcePortRange": "*",
+                    "destinationPortRange": "3389",
+                    "sourceAddressPrefixes": [
+                        "1.1.1.1"
+                    ],
+                    "destinationAddressPrefix": "10.250.6.0/24",
+                    "access": "Allow",
+                    "priority": 3922,
+                    "direction": "Inbound"
+                }
+            },
+            {
+                "name": "AllowTrustedCorpInBound",
+                "properties": {
+                    "protocol": "*",
+                    "sourcePortRange": "*",
+                    "destinationPortRange": "*",
+                    "sourceAddressPrefix": "10.1.1.0/24",
+                    "destinationAddressPrefix": "10.250.1.0/24",
+                    "access": "Allow",
+                    "priority": 3905,
+                    "direction": "Inbound"
+                }
+            },
+            {
+                "name": "AllowHttpsInBound",
+                "properties": {
+                    "protocol": "TCP",
+                    "sourcePortRange": "*",
+                    "destinationPortRange": "443",
+                    "sourceAddressPrefix": "*",
+                    "destinationAddressPrefix": "*",
+                    "access": "Allow",
+                    "priority": 3990,
+                    "direction": "Inbound"
+                }
+            }
+        ]
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "[concat('WebApp', parameters('networkInfo')[copyIndex()].networkLocation, 'Nsg')]",
+            "apiVersion": "2017-06-01",
+            "location": "[parameters('networkInfo')[copyIndex()].networkLocation]",
+            "properties": {
+                "securityRules": "[concat(variables('sharedNsgRules'), variables('backendWebAppNsgRules'))]"
+            },
+            "resources": [],
+            "dependsOn": [],
+            "copy": {
+                "name": "nsgcopy",
+                "count": "[length(parameters('networkInfo'))]"
+            }
+        },
+        {
+            "apiVersion": "2016-12-01",
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[parameters('networkInfo')[copyIndex()].networkName]",
+            "location": "[parameters('networkInfo')[copyIndex()].networkLocation]",
+            "dependsOn": ["nsgcopy"],
+            "copy": {
+                "name": "vnetcopy",
+                "count": "[length(parameters('networkInfo'))]"
+            },
+            "properties": {
+                "dhcpOptions": {
+                    "dnsServers": "[parameters('dnsServerAddresses')]"                        
+                },
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[concat('10.', parameters('secondOctet'), '.', parameters('networkInfo')[copyIndex()].offset, '.0/18')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('gatewaySubnetName')]",
+                        "properties": {
+                            "addressPrefix": "[concat('10.', parameters('secondOctet'), '.', parameters('networkInfo')[copyIndex()].offset, '.0/24')]"
+                        }
+                    },
+                    {
+                        "name": "S1Network",
+                        "properties": {
+                            "addressPrefix": "[concat('10.', parameters('secondOctet'), '.', add(parameters('networkInfo')[copyIndex()].offset, 6), '.0/24')]",
+                            "networkSecurityGroup": {
+                                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', concat('WebApp', parameters('networkInfo')[copyIndex()].networkLocation, 'Nsg'))]"
+                            },
+                            "serviceEndpoints": "[if(parameters('networkInfo')[copyIndex()].enableServiceEndpoints, variables('serviceEndpoints'), variables('emptyArray'))]"
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}
