@@ -1,6 +1,6 @@
 
 # az login
-#.\deploy.ps1 -subscriptionName 'Visual Studio Enterprise' -resourceGroupName 'Scenario1RG' -templateFilePath ..\Templates\encrypted-windows-managed-disk-no-dsc.json -parametersFilePath ..\Parameters\s1-web-server.json -storageAccountResourceGroup 'vseLocal' -storageAccountName 'jlockedevopssource' -storageAccountSubscriptionName 'Visual Studio Enterprise'
+#.\deploy.ps1 -subscriptionName 'Visual Studio Enterprise' -resourceGroupName 'Scenario1RG' -templateFilePath ..\Templates\vm.json -parametersFilePath ..\Parameters\s1-web-server.json -storageAccountResourceGroup 'vseLocal' -storageAccountName 'jlockedevopssource' -storageAccountSubscriptionName 'Visual Studio Enterprise'
 <#
 .SYNOPSIS
 Deploys a template to Azure
