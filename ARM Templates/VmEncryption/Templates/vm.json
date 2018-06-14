@@ -208,15 +208,6 @@
                     "intervalInSeconds": "5",
                     "numberOfProbes": "2"
                 }
-            },
-            {
-                "name": "[concat('port', parameters('healthProbePorts')[mod(2, length(parameters('healthProbePorts')))], 'Probe')]",
-                "properties": {
-                    "protocol": "tcp",
-                    "port": "[parameters('healthProbePorts')[mod(2, length(parameters('healthProbePorts')))]]",
-                    "intervalInSeconds": "5",
-                    "numberOfProbes": "2"
-                }
             }
         ],
         "loadBalancingRules": [
@@ -662,105 +653,66 @@
                         "storageUri": "[concat('http://',variables('storageAccountName'),'.blob.core.windows.net')]"
                     }
                 }
-            }
-        },
-        {
-            "apiVersion": "2016-09-01",
-            "type": "Microsoft.Network/networkInterfaces",
-            "name": "[concat(parameters('virtualMachineNamePrefix'), variables('nicNamePrefix'), copyindex())]",
-            "location": "[parameters('region')]",
-            "copy": {
-                "name": "IISNicLoop",
-                "count": "[variables('numberOfIISVmInstances')]"
             },
-            "dependsOn": [
-                "[concat('Microsoft.Network/loadBalancers/', variables('lbName'))]"
-            ],
-            "properties": {
-                "ipConfigurations": [
-                    {
-                        "name": "ipconfig1",
-                        "properties": {
-                            "privateIPAllocationMethod": "Static",
-                            "privateIPAddress": "[parameters('privateIPs')[copyindex()]]",
-                            "subnet": {
-                                "id": "[variables('subnetRef')]"
-                            },
-                            "loadBalancerBackendAddressPools": [
-                                {
-                                    "id": "[concat(variables('lbID'), '/backendAddressPools/s1-backend-pool')]"
-                                }
-                            ]
+            "resources": [
+                {
+                    "type": "extensions",
+                    "location": "[parameters('region')]",
+                    "dependsOn": [
+                        "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]"
+                    ],
+                    "name": "[variables('encryptionExtensionName')]",
+                    "apiVersion": "2017-03-30",
+                    "properties": {
+                        "publisher": "Microsoft.Azure.Security",
+                        "type": "AzureDiskEncryption",
+                        "typeHandlerVersion": "1.1",
+                        "autoUpgradeMinorVersion": true,
+                        "forceUpdateTag": "[parameters('sequenceVersion')]",
+                        "settings": {
+                            "AADClientID": "[parameters('aadClientID')]",
+                            "KeyVaultURL": "[variables('keyVaultURL')]",
+                            "KeyEncryptionKeyURL": "[parameters('keyEncryptionKeyURL')]",
+                            "KeyEncryptionAlgorithm": "RSA-OAEP",
+                            "VolumeType": "All",
+                            "EncryptionOperation": "EnableEncryption"
+                        },
+                        "protectedSettings": {
+                            "AADClientSecret": "[parameters('aadClientSecret')]"
                         }
                     }
-                ],
-                "enableIPForwarding": true
-            }
-        },
-        {
-            "type": "Microsoft.Compute/virtualMachines/extensions",
-            "location": "[parameters('region')]",
-            "copy": {
-                "name": "IISVMLoop",
-                "count": "[variables('numberOfIISVmInstances')]"
-            },
-            "dependsOn": [
-                "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]"
-            ],
-            "name": "[concat(parameters('virtualMachineNamePrefix'),'-', copyindex(), '/', variables('encryptionExtensionName'))]",
-            "apiVersion": "2016-04-30-preview",
-            "properties": {
-                "publisher": "Microsoft.Azure.Security",
-                "type": "AzureDiskEncryption",
-                "typeHandlerVersion": "1.1",
-                "autoUpgradeMinorVersion": true,
-                "forceUpdateTag": "[parameters('sequenceVersion')]",
-                "settings": {
-                    "AADClientID": "[parameters('aadClientID')]",
-                    "KeyVaultURL": "[variables('keyVaultURL')]",
-                    "KeyEncryptionKeyURL": "[parameters('keyEncryptionKeyURL')]",
-                    "KeyEncryptionAlgorithm": "RSA-OAEP",
-                    "VolumeType": "All",
-                    "EncryptionOperation": "EnableEncryption"
                 },
-                "protectedSettings": {
-                    "AADClientSecret": "[parameters('aadClientSecret')]"
-                }
-            }
-        },
-        {
-            "name": "IaaSAntimalware",
-            "copy": {
-                "name": "IISVMLoop",
-                "count": "[variables('numberOfIISVmInstances')]"
-            },
-            "dependsOn": [
-                "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]"
-            ],
-            "type": "Microsoft.Compute/virtualMachines/extensions",
-            "location": "[parameters('region')]",
-            "apiVersion": "2015-06-15",
-            "properties": {
-                "publisher": "Microsoft.Azure.Security",
-                "type": "IaaSAntimalware",
-                "typeHandlerVersion": "1.1",
-                "autoUpgradeMinorVersion": true,
-                "settings": {
-                    "AntimalwareEnabled": "true",
-                    "Exclusions": {
-                        "Paths": "",
-                        "Extensions": "",
-                        "Processes": ""
-                    },
-                    "RealtimeProtectionEnabled": "true",
-                    "ScheduledScanSettings": {
-                        "isEnabled": "true",
-                        "scanType": "Quick",
-                        "day": "7",
-                        "time": "120"
+                {
+                    "name": "IaaSAntimalware",
+                    "dependsOn": [
+                        "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]"
+                    ],
+                    "type": "extensions",
+                    "location": "[parameters('region')]",
+                    "apiVersion": "2017-03-30",
+                    "properties": {
+                        "publisher": "Microsoft.Azure.Security",
+                        "type": "IaaSAntimalware",
+                        "typeHandlerVersion": "1.1",
+                        "autoUpgradeMinorVersion": true,
+                        "settings": {
+                            "AntimalwareEnabled": "true",
+                            "Exclusions": {
+                                "Paths": "",
+                                "Extensions": "",
+                                "Processes": ""
+                            },
+                            "RealtimeProtectionEnabled": "true",
+                            "ScheduledScanSettings": {
+                                "isEnabled": "true",
+                                "scanType": "Quick",
+                                "day": "7",
+                                "time": "120"
+                            }
+                        }
                     }
                 }
-            }
+            ]
         },
         {
             "name": "[concat('UpdateVmEncryptionSettings-', parameters('virtualMachineNamePrefix'), '-', copyindex())]",
@@ -794,7 +746,7 @@
                         "value": "[variables('keyVaultResourceID')]"
                     },
                     "keyVaultSecretUrl": {
-                        "value": "[reference(resourceId('Microsoft.Compute/virtualMachines/extensions',  parameters('vmName'), variables('encryptionExtensionName'))).instanceView.statuses[0].message]"
+                        "value": "[reference(resourceId('Microsoft.Compute/virtualMachines/extensions',  concat(parameters('virtualMachineNamePrefix'), '-', copyindex()), variables('encryptionExtensionName'))).instanceView.statuses[0].message]"
                     },
                     "keyEncryptionKeyURL": {
                         "value": "[parameters('keyEncryptionKeyURL')]"
@@ -820,6 +772,39 @@
                         }
                     }
                 }
+            }
+        },
+        {
+            "apiVersion": "2016-09-01",
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[concat(parameters('virtualMachineNamePrefix'), variables('nicNamePrefix'), copyindex())]",
+            "location": "[parameters('region')]",
+            "copy": {
+                "name": "IISNicLoop",
+                "count": "[variables('numberOfIISVmInstances')]"
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Network/loadBalancers/', variables('lbName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Static",
+                            "privateIPAddress": "[parameters('privateIPs')[copyindex()]]",
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            },
+                            "loadBalancerBackendAddressPools": [
+                                {
+                                    "id": "[concat(variables('lbID'), '/backendAddressPools/s1-backend-pool')]"
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "enableIPForwarding": true
             }
         }
     ],
