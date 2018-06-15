@@ -130,7 +130,7 @@
                     "sourceAddressPrefixes": [
                         "1.1.1.1"
                     ],
-                    "destinationAddressPrefix": "10.250.6.0/24",
+                    "destinationAddressPrefix": "10.1.6.0/24",
                     "access": "Allow",
                     "priority": 3922,
                     "direction": "Inbound"
@@ -143,7 +143,7 @@
                     "sourcePortRange": "*",
                     "destinationPortRange": "*",
                     "sourceAddressPrefix": "10.1.1.0/24",
-                    "destinationAddressPrefix": "10.250.1.0/24",
+                    "destinationAddressPrefix": "10.1.1.0/24",
                     "access": "Allow",
                     "priority": 3905,
                     "direction": "Inbound"
