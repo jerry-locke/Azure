@@ -1,37 +1,37 @@
 ﻿{
-    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
-    "contentVersion": "1.0.0.0",
-    "parameters": {
-        "templateBaseUrl": {
-            "value": "https://jlockedevopssource.blob.core.windows.net/armtemplates"
-        },
-        "sasToken": {
-            "value": "?sv=2015-04-05\u0026sr=c\u0026sig=Mj8YPVTdDvAnsRK6Xbe4B2bjXUGpt6PhJWXlHuSnUPY%3D\u0026spr=https\u0026st=2018-06-12T19%3A38%3A34Z\u0026se=2018-06-12T20%3A38%3A34Z\u0026sp=r"
-        },
-        "secondOctet": {
-            "value": 1
-        },
-        "networkInfo": {
-            "value": [
-                {
-                    "networkName": "EastUSWebAppVNet",
-                    "networkLocation": "EastUS",
-                    "gatewayName": "EastUSWebAppVNetGateway",
-                    "offset": 0,
-                    "enableServiceEndpoints": false
-                }
-            ]
-        },
-        "storageServiceEndpointLocations": {
-            "value": [
-                "eastus"
-            ]
-        },
-        "dnsServerAddresses": {
-            "value": [
-                "10.1.1.4",
-                "10.1.1.5"
-            ]
-        }
-    }
+    "$schema":  "http://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion":  "1.0.0.0",
+    "parameters":  {
+                       "templateBaseUrl":  {
+                                               "value":  "https://jlockedevopssource.blob.core.windows.net/armtemplates"
+                                           },
+                       "sasToken":  {
+                                        "value":  "?sv=2015-04-05\u0026sr=c\u0026sig=E2Iz83Kdhk%2FPq%2BD2dpxwSXf13RcmH18FMoYJitbGC98%3D\u0026spr=https\u0026st=2018-06-15T03%3A31%3A46Z\u0026se=2018-06-15T04%3A31%3A46Z\u0026sp=r"
+                                    },
+                       "secondOctet":  {
+                                           "value":  1
+                                       },
+                       "networkInfo":  {
+                                           "value":  [
+                                                         {
+                                                             "networkName":  "EastUSWebAppVNet",
+                                                             "networkLocation":  "EastUS",
+                                                             "gatewayName":  "EastUSWebAppVNetGateway",
+                                                             "offset":  0,
+                                                             "enableServiceEndpoints":  false
+                                                         }
+                                                     ]
+                                       },
+                       "storageServiceEndpointLocations":  {
+                                                               "value":  [
+                                                                             "eastus"
+                                                                         ]
+                                                           },
+                       "dnsServerAddresses":  {
+                                                  "value":  [
+                                                                "10.1.1.4",
+                                                                "10.1.1.5"
+                                                            ]
+                                              }
+                   }
 }
