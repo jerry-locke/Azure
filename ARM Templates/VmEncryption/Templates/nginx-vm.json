@@ -1,0 +1,817 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "templateBaseUrl": {
+            "type": "securestring"
+        },
+        "sasToken": {
+            "type": "securestring"
+        },
+        "region": {
+            "type": "string",
+            "allowedValues": [
+                "northcentralus",
+                "southcentralus",
+                "eastus",
+                "eastus2",
+                "westus",
+                "centralus"
+            ]
+        },
+        "numberOfZones": {
+            "type": "int",
+            "defaultValue": 0,
+            "minValue": 0,
+            "maxValue": 3,
+            "metadata": {
+                "description": "Number of Zones to provision VMs in."
+            }
+        },
+        "virtualNetworkName": {
+            "type": "string"
+        },
+        "subnetName": {
+            "type": "string"
+        },
+        "networkResourceGroupName": {
+            "type": "string"
+        },
+        "lbDNSLabelPrefix": {
+            "type": "string",
+            "metadata": {
+                "description": "DNS Label for the load balancer Public IP. Must be lowercase. It should match with the regex: ^[a-z][a-z0-9-]{1,61}[a-z0-9]$."
+            }
+        },
+        "ports": {
+            "type": "array",
+            "defaultValue": [
+                {
+                    "port": "22",
+                    "probe": "80",
+                    "protocol": "tcp"
+                },
+                {
+                    "port": "53",
+                    "probe": "80",
+                    "protocol": "udp"
+                },
+                {
+                    "port": "53",
+                    "probe": "80",
+                    "protocol": "tcp"
+                },
+                {
+                    "port": "80",
+                    "probe": "80",
+                    "protocol": "tcp"
+                },
+                {
+                    "port": "443",
+                    "probe": "443",
+                    "protocol": "tcp"
+                }
+            ]
+        },
+        "healthProbePorts": {
+            "type": "array",
+            "defaultValue": [
+                "80",
+                "443"
+            ]
+        },
+        "virtualMachineNamePrefix": {
+            "type": "string"
+        },
+        "virtualMachineSize": {
+            "type": "string",
+            "allowedValues": [
+                "Standard_B2S",
+                "Standard_A1_V2",
+                "Standard_F1"
+            ],
+            "defaultValue": "Standard_B2S"
+        },
+        "privateIPs": {
+            "type": "array"
+        },
+        "adminUsername": {
+            "type": "string"
+        },
+        "adminPassword": {
+            "type": "securestring"
+        },
+        "saPrefix": {
+            "type": "string"
+        },
+        "storageAccountType": {
+            "type": "string",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Premium_LRS"
+            ],
+            "defaultValue": "Standard_LRS",
+            "metadata": {
+                "description": "Replication option for the VM image storage account"
+            }
+        },
+        "diagnosticsStorageAccountName": {
+            "type": "string"
+        },
+        "diagnosticsStorageAccountType": {
+            "type": "string",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_GRS",
+                "Premium_LRS"
+            ],
+            "defaultValue": "Standard_LRS",
+            "metadata": {
+                "description": "Replication option for the VM image storage account"
+            }
+        },
+        "aadClientID": {
+            "type": "string",
+            "metadata": {
+                "description": "Client ID of AAD app which has permissions to KeyVault"
+            }
+        },
+        "aadClientSecret": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Client Secret of AAD app which has permissions to KeyVault"
+            }
+        },
+        "keyVaultName": {
+            "type": "string",
+            "metadata": {
+                "description": "Name of the KeyVault to place the volume encryption key"
+            }
+        },
+        "keyVaultResourceGroup": {
+            "type": "string",
+            "metadata": {
+                "description": "Resource group of the KeyVault"
+            }
+        },
+        "keyEncryptionKeyURL": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "URL of the KeyEncryptionKey used to encrypt the volume encryption key"
+            }
+        },
+        "sequenceVersion": {
+            "type": "string",
+            "defaultValue": "1.0",
+            "metadata": {
+                "description": "Pass in an unique value like a GUID everytime the operation needs to be force run"
+            }
+        }
+    },
+    "variables": {
+        "keyVaultURL": "[concat('https://', parameters('keyVaultName'), '.vault.azure.net/')]",
+        "keyVaultResourceID": "[concat(subscription().id,'/resourceGroups/',parameters('keyVaultResourceGroup'),'/providers/Microsoft.KeyVault/vaults/', parameters('keyVaultName'))]",
+        "encryptionExtensionName": "AzureDiskEncryption",
+        "vmEncryptionTemplatePath": "/VmEncryption/Templates/updatevm-kek.json",
+        "availabilitySetName": "[concat(parameters('virtualMachineNamePrefix'), '-AvSet')]",
+        "availabilitySet": {
+            "id": "[resourceId('Microsoft.Compute/availabilitySets',variables('availabilitySetName'))]"
+        },
+        "storageAccountName": "[concat(parameters('saPrefix'),'s1sa')]",
+        "vnetId": "[resourceId(parameters('networkResourceGroupName'),'Microsoft.Network/virtualNetworks', parameters('virtualNetworkName'))]",
+        "subnetRef": "[concat(variables('vnetId'), '/subnets/', parameters('subnetName'))]",
+        "numberOfIISVmInstances": "[length(parameters('privateIPs'))]",
+        "nicNamePrefix": "-nic-",
+        "lbName": "[concat(parameters('region'), '-public-lb')]",
+        "lbPublicIPAddressType": "Static",
+        "lbPublicIPAddressName": "[concat(variables('lbName'), '-publicip')]",
+        "lbID": "[resourceId('Microsoft.Network/loadBalancers',variables('lbName'))]",
+        "frontEndIPConfigID": "[concat(variables('lbID'),'/frontendIPConfigurations/LoadBalancerFrontEnd')]",
+        "lbPoolID": "[concat(variables('lbID'),'/backendAddressPools/s1-backend-pool')]",
+        "probes": [
+            {
+                "name": "[concat('port', parameters('healthProbePorts')[mod(0, length(parameters('healthProbePorts')))], 'Probe')]",
+                "properties": {
+                    "protocol": "tcp",
+                    "port": "[parameters('healthProbePorts')[mod(0, length(parameters('healthProbePorts')))]]",
+                    "intervalInSeconds": "5",
+                    "numberOfProbes": "2"
+                }
+            },
+            {
+                "name": "[concat('port', parameters('healthProbePorts')[mod(1, length(parameters('healthProbePorts')))], 'Probe')]",
+                "properties": {
+                    "protocol": "tcp",
+                    "port": "[parameters('healthProbePorts')[mod(1, length(parameters('healthProbePorts')))]]",
+                    "intervalInSeconds": "5",
+                    "numberOfProbes": "2"
+                }
+            }
+        ],
+        "loadBalancingRules": [
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(0, length(parameters('ports')))].port, parameters('ports')[mod(0, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(0, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(0, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(0, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(0, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(1, length(parameters('ports')))].port, parameters('ports')[mod(1, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(1, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(1, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(1, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(1, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(2, length(parameters('ports')))].port, parameters('ports')[mod(2, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(2, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(2, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(2, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(2, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(3, length(parameters('ports')))].port, parameters('ports')[mod(3, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(3, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(3, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(3, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(3, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(4, length(parameters('ports')))].port, parameters('ports')[mod(4, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(4, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(4, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(4, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(4, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(5, length(parameters('ports')))].port, parameters('ports')[mod(5, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(5, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(5, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(5, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(5, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(6, length(parameters('ports')))].port, parameters('ports')[mod(6, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(6, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(6, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(6, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(6, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(7, length(parameters('ports')))].port, parameters('ports')[mod(7, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(7, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(7, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(7, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(7, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(8, length(parameters('ports')))].port, parameters('ports')[mod(8, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(8, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(8, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(8, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(8, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(9, length(parameters('ports')))].port, parameters('ports')[mod(9, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(9, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(9, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(9, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(9, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(10, length(parameters('ports')))].port, parameters('ports')[mod(10, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(10, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(10, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(10, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(10, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(11, length(parameters('ports')))].port, parameters('ports')[mod(11, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(11, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(11, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(11, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(11, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(12, length(parameters('ports')))].port, parameters('ports')[mod(12, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(12, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(12, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(12, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(12, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(13, length(parameters('ports')))].port, parameters('ports')[mod(13, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(13, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(13, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(13, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(13, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(14, length(parameters('ports')))].port, parameters('ports')[mod(14, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(14, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(14, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(14, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(14, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            },
+            {
+                "name": "[concat('LBRulePort', parameters('ports')[mod(15, length(parameters('ports')))].port, parameters('ports')[mod(15, length(parameters('ports')))].protocol)]",
+                "properties": {
+                    "frontendIPConfiguration": {
+                        "id": "[variables('frontEndIPConfigID')]"
+                    },
+                    "backendAddressPool": {
+                        "id": "[variables('lbPoolID')]"
+                    },
+                    "protocol": "[parameters('ports')[mod(15, length(parameters('ports')))].protocol]",
+                    "frontendPort": "[parameters('ports')[mod(15, length(parameters('ports')))].port]",
+                    "backendPort": "[parameters('ports')[mod(15, length(parameters('ports')))].port]",
+                    "enableFloatingIP": false,
+                    "idleTimeoutInMinutes": 5,
+                    "probe": {
+                        "id": "[concat(variables('lbID'),'/probes/port', parameters('ports')[mod(15, length(parameters('ports')))].probe,'Probe')]"
+                    }
+                }
+            }
+        ]
+    },
+    "resources": [
+        {
+            "apiVersion": "2017-10-01",
+            "name": "[variables('lbName')]",
+            "type": "Microsoft.Network/loadBalancers",
+            "location": "[parameters('region')]",
+            "sku": {
+                "name": "[if(greater(parameters('numberOfZones'),0), 'Standard', 'Basic')]"
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Network/publicIPAddresses/', variables('lbPublicIPAddressName'))]"
+            ],
+            "properties": {
+                "frontendIPConfigurations": [
+                    {
+                        "name": "LoadBalancerFrontEnd",
+                        "properties": {
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses',variables('lbPublicIPAddressName'))]"
+                            }
+                        }
+                    }
+                ],
+                "backendAddressPools": [
+                    {
+                        "name": "s1-backend-pool"
+                    }
+                ],
+                "loadBalancingRules": "[take(variables('loadBalancingRules'), length(parameters('ports')))]",
+                "probes": "[take(variables('probes'), length(parameters('ports')))]"
+            }
+        },
+        {
+            "apiVersion": "2017-09-01",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('lbPublicIPAddressName')]",
+            "location": "[parameters('region')]",
+            "sku": {
+                "name": "[if(greater(parameters('numberOfZones'),0), 'Standard', 'Basic')]"
+            },
+            "properties": {
+                "publicIPAllocationMethod": "[variables('lbPublicIPAddressType')]",
+                "dnsSettings": {
+                    "domainNameLabel": "[parameters('lbDNSLabelPrefix')]"
+                }
+            }
+        },
+        {
+            "condition": "[equals(parameters('numberOfZones'),0)]",
+            "type": "Microsoft.Compute/availabilitySets",
+            "apiVersion": "2017-03-30",
+            "name": "[variables('availabilitySetName')]",
+            "location": "[parameters('region')]",
+            "properties": {
+                "platformFaultDomainCount": 2,
+                "platformUpdateDomainCount": 2
+            },
+            "sku": {
+                "name": "Aligned"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('storageAccountName')]",
+            "apiVersion": "2016-01-01",
+            "location": "[parameters('region')]",
+            "sku": {
+                "name": "[parameters('storageAccountType')]"
+            },
+            "kind": "Storage",
+            "properties": {
+                "encryption": {
+                    "keySource": "Microsoft.Storage",
+                    "services": {
+                        "blob": {
+                            "enabled": true
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]",
+            "copy": {
+                "name": "IISVMLoop",
+                "count": "[variables('numberOfIISVmInstances')]"
+            },
+            "zones": "[if(greater(parameters('numberOfZones'),0),split(string(add(mod(copyIndex(),max(1,parameters('numberOfZones'))),1)), ','), json('null'))]",
+            "apiVersion": "2017-03-30",
+            "location": "[parameters('region')]",
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountName'))]",
+                "[concat('Microsoft.Network/networkInterfaces/', parameters('virtualMachineNamePrefix'), variables('nicNamePrefix'), copyindex())]",
+                "[concat('Microsoft.Compute/availabilitySets/', variables('availabilitySetName'))]"
+            ],
+            "properties": {
+                "osProfile": {
+                    "computername": "[concat(parameters('virtualMachineNamePrefix'), '-', copyIndex())]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]"
+                },
+                "hardwareProfile": {
+                    "vmSize": "[parameters('virtualMachineSize')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('imagePublisher')]",
+                        "offer": "[variables('imageOffer')]",
+                        "sku": "[parameters('ubuntuOSVersion')]",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex(), '-osdisk')]",
+                        "createOption": "FromImage",
+                        "caching": "ReadWrite",
+                        "diskSizeGB": 128,
+                        "managedDisk": {
+                            "storageAccountType": "[parameters('storageAccountType')]"
+                        }
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(parameters('virtualMachineNamePrefix'), variables('nicNamePrefix'),copyindex()))]"
+                        }
+                    ]
+                },
+                "availabilitySet": "[if(equals(parameters('numberOfZones'),0), variables('availabilitySet'), json('null'))]",
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[concat('http://',variables('storageAccountName'),'.blob.core.windows.net')]"
+                    }
+                }
+            },
+            "resources": [
+                {
+                    "type": "extensions",
+                    "location": "[parameters('region')]",
+                    "dependsOn": [
+                        "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]"
+                    ],
+                    "name": "[variables('encryptionExtensionName')]",
+                    "apiVersion": "2017-03-30",
+                    "properties": {
+                        "publisher": "Microsoft.Azure.Security",
+                        "type": "AzureDiskEncryption",
+                        "typeHandlerVersion": "1.1",
+                        "autoUpgradeMinorVersion": true,
+                        "forceUpdateTag": "[parameters('sequenceVersion')]",
+                        "settings": {
+                            "AADClientID": "[parameters('aadClientID')]",
+                            "KeyVaultURL": "[variables('keyVaultURL')]",
+                            "KeyEncryptionKeyURL": "[parameters('keyEncryptionKeyURL')]",
+                            "KeyEncryptionAlgorithm": "RSA-OAEP",
+                            "VolumeType": "All",
+                            "EncryptionOperation": "EnableEncryption"
+                        },
+                        "protectedSettings": {
+                            "AADClientSecret": "[parameters('aadClientSecret')]"
+                        }
+                    }
+                },
+                {
+                    "name": "IaaSAntimalware",
+                    "dependsOn": [
+                        "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]"
+                    ],
+                    "type": "extensions",
+                    "location": "[parameters('region')]",
+                    "apiVersion": "2017-03-30",
+                    "properties": {
+                        "publisher": "Microsoft.Azure.Security",
+                        "type": "IaaSAntimalware",
+                        "typeHandlerVersion": "1.1",
+                        "autoUpgradeMinorVersion": true,
+                        "settings": {
+                            "AntimalwareEnabled": "true",
+                            "Exclusions": {
+                                "Paths": "",
+                                "Extensions": "",
+                                "Processes": ""
+                            },
+                            "RealtimeProtectionEnabled": "true",
+                            "ScheduledScanSettings": {
+                                "isEnabled": "true",
+                                "scanType": "Quick",
+                                "day": "7",
+                                "time": "120"
+                            }
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "[concat('UpdateVmEncryptionSettings-', parameters('virtualMachineNamePrefix'), '-', copyindex())]",
+            "type": "Microsoft.Resources/deployments",
+            "apiVersion": "2015-01-01",
+            "copy": {
+                "name": "IISVMLoop",
+                "count": "[variables('numberOfIISVmInstances')]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines/extensions',  concat(parameters('virtualMachineNamePrefix'), '-', copyindex()), variables('encryptionExtensionName'))]"
+            ],
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "[concat(parameters('templateBaseUrl'), variables('vmEncryptionTemplatePath'), parameters('sasToken'))]",
+                    "contentVersion": "1.0.0.0"
+                },
+                "copy": {
+                    "name": "IISVMLoop",
+                    "count": "[variables('numberOfIISVmInstances')]"
+                },
+                "parameters": {
+                    "location": {
+                        "value": "[parameters('region')]"
+                    },
+                    "vmName": {
+                        "value": "[concat(parameters('virtualMachineNamePrefix'), '-', copyindex())]"
+                    },
+                    "keyVaultResourceID": {
+                        "value": "[variables('keyVaultResourceID')]"
+                    },
+                    "keyVaultSecretUrl": {
+                        "value": "[reference(resourceId('Microsoft.Compute/virtualMachines/extensions',  concat(parameters('virtualMachineNamePrefix'), '-', copyindex()), variables('encryptionExtensionName'))).instanceView.statuses[0].message]"
+                    },
+                    "keyEncryptionKeyURL": {
+                        "value": "[parameters('keyEncryptionKeyURL')]"
+                    }
+                }
+            }
+        },
+        {
+            "name": "[parameters('diagnosticsStorageAccountName')]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2016-01-01",
+            "location": "[parameters('region')]",
+            "sku": {
+                "name": "[parameters('diagnosticsStorageAccountType')]"
+            },
+            "kind": "Storage",
+            "properties": {
+                "encryption": {
+                    "keySource": "Microsoft.Storage",
+                    "services": {
+                        "blob": {
+                            "enabled": true
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "apiVersion": "2016-09-01",
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[concat(parameters('virtualMachineNamePrefix'), variables('nicNamePrefix'), copyindex())]",
+            "location": "[parameters('region')]",
+            "copy": {
+                "name": "IISNicLoop",
+                "count": "[variables('numberOfIISVmInstances')]"
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Network/loadBalancers/', variables('lbName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Static",
+                            "privateIPAddress": "[parameters('privateIPs')[copyindex()]]",
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            },
+                            "loadBalancerBackendAddressPools": [
+                                {
+                                    "id": "[concat(variables('lbID'), '/backendAddressPools/s1-backend-pool')]"
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "enableIPForwarding": true
+            }
+        }
+    ],
+    "outputs": {
+        "adminUsername": {
+            "type": "string",
+            "value": "[parameters('adminUsername')]"
+        }
+    }
+}
